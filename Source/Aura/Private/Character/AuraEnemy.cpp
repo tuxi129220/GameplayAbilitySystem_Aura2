@@ -15,7 +15,6 @@
 #include "BehaviorTree/BlackboardComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 
-
 AAuraEnemy::AAuraEnemy()
 {
 	GetMesh()->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
@@ -33,6 +32,13 @@ AAuraEnemy::AAuraEnemy()
 
 	HealthBar = CreateDefaultSubobject<UWidgetComponent>("HealthBar");
 	HealthBar->SetupAttachment(GetRootComponent());
+
+	GetMesh()->SetCustomDepthStencilValue(CUSTOM_DEPTH_RED);
+	GetMesh()->MarkRenderStateDirty();
+	Weapon->SetCustomDepthStencilValue(CUSTOM_DEPTH_RED);
+	Weapon->MarkRenderStateDirty();
+	
+	BaseWalkSpeed = 250.f;
 }
 
 void AAuraEnemy::PossessedBy(AController* NewController)
@@ -47,18 +53,21 @@ void AAuraEnemy::PossessedBy(AController* NewController)
 	AuraAIController->GetBlackboardComponent()->SetValueAsBool(FName("RangedAttacker"), CharacterClass != ECharacterClass::Warrior);
 }
 
-void AAuraEnemy::HighlightActor()
+void AAuraEnemy::HighlightActor_Implementation()
 {
 	GetMesh()->SetRenderCustomDepth(true);
-	GetMesh()->SetCustomDepthStencilValue(CUSTOM_DEPTH_RED);
 	Weapon->SetRenderCustomDepth(true);
-	Weapon->SetCustomDepthStencilValue(CUSTOM_DEPTH_RED);
 }
 
-void AAuraEnemy::UnHighlightActor()
+void AAuraEnemy::UnHighlightActor_Implementation()
 {
 	GetMesh()->SetRenderCustomDepth(false);
 	Weapon->SetRenderCustomDepth(false);
+}
+
+void AAuraEnemy::SetMoveToLocation_Implementation(FVector& OutDestination)
+{
+	// Do not change OutDestination
 }
 
 int32 AAuraEnemy::GetPlayerLevel_Implementation()
@@ -66,12 +75,12 @@ int32 AAuraEnemy::GetPlayerLevel_Implementation()
 	return Level;
 }
 
-void AAuraEnemy::Die()
+void AAuraEnemy::Die(const FVector& DeathImpulse)
 {
 	SetLifeSpan(LifeSpan);
 	if (AuraAIController) AuraAIController->GetBlackboardComponent()->SetValueAsBool(FName("Dead"), true);
-	
-	Super::Die();
+	SpawnLoot();
+	Super::Die(DeathImpulse);
 }
 
 void AAuraEnemy::SetCombatTarget_Implementation(AActor* InCombatTarget)
@@ -140,15 +149,27 @@ void AAuraEnemy::InitAbilityActorInfo()
 {
 	AbilitySystemComponent->InitAbilityActorInfo(this, this);
 	Cast<UAuraAbilitySystemComponent>(AbilitySystemComponent)->AbilityActorInfoSet();
+	AbilitySystemComponent->RegisterGameplayTagEvent(FAuraGameplayTags::Get().Debuff_Stun, EGameplayTagEventType::NewOrRemoved).AddUObject(this, &AAuraEnemy::StunTagChanged);
+
 
 	if (HasAuthority())
 	{
 		InitializeDefaultAttributes();		
 	}
-
+	OnAscRegistered.Broadcast(AbilitySystemComponent);
 }
 
 void AAuraEnemy::InitializeDefaultAttributes() const
 {
 	UAuraAbilitySystemLibrary::InitializeDefaultAttributes(this, CharacterClass, Level, AbilitySystemComponent);
+}
+
+void AAuraEnemy::StunTagChanged(const FGameplayTag CallbackTag, int32 NewCount)
+{
+	Super::StunTagChanged(CallbackTag, NewCount);
+	
+	if (AuraAIController && AuraAIController->GetBlackboardComponent())
+	{
+		AuraAIController->GetBlackboardComponent()->SetValueAsBool(FName("Stunned"), bIsStunned);
+	}
 }
